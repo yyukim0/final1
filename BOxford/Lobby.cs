@@ -8,30 +8,10 @@ namespace BOxford
 {
     public partial class Lobby : Form
     {
-
-        //
-        // Exibindo graficamente --------------------------------------------------------------------
-        //
-
         //Atribuindo a letra para uma imagem
         private Dictionary<string, Image> imagensCartas = new Dictionary<string, Image>();
         private int rodadaAtual = 1;
-        private void CarregarImagensCartas()
-        {
-            imagensCartas["A"] = Properties.Resources.CartaA;
-            imagensCartas["B"] = Properties.Resources.CartaB;
-            imagensCartas["C"] = Properties.Resources.CartaC;
-            imagensCartas["D"] = Properties.Resources.CartaD;
-            imagensCartas["E"] = Properties.Resources.CartaE;
-            imagensCartas["G"] = Properties.Resources.CartaG;
-            imagensCartas["H"] = Properties.Resources.CartaH;
-            imagensCartas["K"] = Properties.Resources.CartaK;
-            imagensCartas["L"] = Properties.Resources.CartaL;
-            imagensCartas["M"] = Properties.Resources.CartaM;
-            imagensCartas["Q"] = Properties.Resources.CartaQ;
-            imagensCartas["R"] = Properties.Resources.CartaR;
-            imagensCartas["T"] = Properties.Resources.CartaT;
-        }
+        
 
 
         public Lobby()
@@ -75,6 +55,257 @@ namespace BOxford
         }
 
 
+        private void AtualizarTabuleiro(string estadoTabuleiro)
+        {
+            string[] linhas = estadoTabuleiro.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+            Controls.OfType<PictureBox>().ToList().ForEach(p => Controls.Remove(p));
+
+            foreach (string linha in linhas)
+            {
+                string[] partes = linha.Split(',');
+                if (partes.Length != 2) continue;
+
+                int setor = int.Parse(partes[0].Trim());
+                string carta = partes[1].Trim();
+
+                PosicionarCarta(setor, carta);
+            }
+
+        }
+
+        private void PosicionarCarta(int setor, string carta)
+        {
+            Dictionary<int, Point> posicoesSetores = new Dictionary<int, Point>
+    {
+        { 0, new Point(555, 520) },
+        { 1, new Point(555, 440) },
+        { 2, new Point(555, 360) },
+        { 3, new Point(555, 280) },
+        { 4, new Point(555, 200) },
+        { 5, new Point(555, 120) },
+        { 10, new Point(634, 51) }
+    };
+
+            // Verifica se o setor existe
+            if (!posicoesSetores.ContainsKey(setor))
+            {
+                return;
+            }
+
+            // Conta quantas cartas já estão no setor
+            int cartasNoSetor = Controls.OfType<PictureBox>()
+                                        .Count(p => p.Tag != null && (int)p.Tag == setor);
+
+            // Obtém a imagem da carta usando a função ObterImagemDaCarta
+            Image imagem = ObterImagemDaCarta(carta);
+            if (imagem == null)
+            {
+                return;
+            }
+
+            // Define transparência na imagem
+            Bitmap bitmapImagem = new Bitmap(imagem);
+            bitmapImagem.MakeTransparent();
+
+            // Cria a PictureBox da carta
+            PictureBox cartaImg = new PictureBox
+            {
+                Size = new Size(50, 80),
+                Location = new Point(
+                    posicoesSetores[setor].X + (cartasNoSetor * 55),
+                    posicoesSetores[setor].Y
+                ),
+                BackgroundImage = bitmapImagem,
+                BackgroundImageLayout = ImageLayout.Stretch,
+                Tag = setor,
+                BackColor = Color.Transparent
+            };
+
+            // Adiciona ao formulário
+            Controls.Add(cartaImg);
+            cartaImg.BringToFront();
+
+        }
+
+        private Image ObterImagemDaCarta(string carta)
+        {
+            return imagensCartas.ContainsKey(carta) ? imagensCartas[carta] : null;
+        }
+
+        private bool VerificarCartaNoSetor10()
+        {
+            try
+            {
+                // Primeiro sincroniza com o estado real do servidor
+                string estadoTabuleiro = EstadoAtualTabuleiro();
+                var linhas = estadoTabuleiro.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
+
+                foreach (string linha in linhas)
+                {
+                    var partes = linha.Split(',');
+                    if (partes.Length == 2 && int.TryParse(partes[0].Trim(), out int setor) && setor == 10)
+                    {
+                        string carta = partes[1].Trim();
+                        lblControle.Text += $"REI DETECTADO: {carta} no setor 10\n";
+                        return true;
+                    }
+                }
+                return false;
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+        }
+        private bool PartidaFoiIniciada()
+        {
+            try
+            {
+                string retorno = Jogo.VerificarVez(Convert.ToInt32(txtIDpartida.Text));
+                if (string.IsNullOrEmpty(retorno)) return false;
+
+                // Verifica múltiplos indicadores de partida iniciada
+                return retorno.Contains(",J,") ||  // Formato do servidor
+                       retorno.Contains("Jogando") ||
+                       !retorno.Contains("Aguardando");
+            }
+            catch
+            {
+                return false;
+            }
+        }
+        private void AtualizarMinhasCartas()
+        {
+            try
+            {
+                string retorno = Jogo.ListarCartas(Convert.ToInt32(txtIDjogador.Text), txtSenha.Text);
+
+                if (retorno.StartsWith("ERRO:"))
+                {
+                    return;
+                }
+
+                minhasCartas.Clear();
+                foreach (char c in retorno.Trim())
+                {
+                    minhasCartas.Add(c.ToString());
+                }
+
+                // Remove cartas que já estão no tabuleiro
+                var cartasDisponiveis = minhasCartas.Except(personagensColocados).ToList();
+
+                // Ordena as cartas disponíveis pelo ranking
+                minhasCartas = cartasDisponiveis
+                    .OrderByDescending(c => rankingPersonagens.GetValueOrDefault(c, 0))
+                    .ToList();
+
+            }
+            catch (Exception ex)
+            {
+            }
+        }
+        private bool reiEleito = false;
+        private void tmrVerificaVez_Tick(object sender, EventArgs e)
+        {
+            tmrVerificaVez.Enabled = false;
+            try
+            {
+                if (!JogadorConectado()) return;
+
+                // Atualiza primeiro o estado do jogo
+                var (dadosVez, partidaIniciada) = VerificarVezCompleto();
+
+                // Atualiza o tabuleiro visual
+                SincronizarEstadoTabuleiro();
+
+                // Verifica se a partida está em andamento
+                if (!partidaIniciada)
+                {
+                    tmrVerificaVez.Enabled = true;
+                    return;
+                }
+
+                if (dadosVez != null && dadosVez.Length >= 4)
+                {
+                    char faseAtual = dadosVez[3][0];
+                    string idJogadorVez = dadosVez[0];
+
+                    // Atualiza quem tem a vez
+                    lblIdVez.Text = idJogadorVez;
+
+                    // Verifica se houve reinício (setor 10 vazio após coroação)
+                    if (reiEleito && (!setores.ContainsKey(10) || setores[10].Count == 0))
+                    {
+                        reiEleito = false;
+                        votacaoConcluida = false;
+                        ReiniciarRodada();
+                        tmrVerificaVez.Enabled = true;
+                        return;
+                    }
+
+                    // Processa cada fase do jogo de acordo com a estratégia
+                    if (JogadorDaVez())
+                    {
+                        switch (faseAtual)
+                        {
+                            case 'S': // Setup
+                                if (personagensColocados.Count < 13) // Ainda há personagens para colocar
+                                {
+                                    ProcessarSetup();
+                                }
+                                break;
+
+                            case 'P': // Promoção
+                                AtualizarMinhasCartas();
+                                ProcessarPromocao();
+                                break;
+
+                            case 'V': // Votação
+
+                                AtualizarMinhasCartas();
+                                ProcessarVotacao();
+
+                                break;
+                        }
+
+                        // Verifica se o jogo terminou
+                        VerificarFimDeJogo();
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+            }
+            finally
+            {
+                tmrVerificaVez.Enabled = true;
+            }
+        }
+        private string EscolherVotoEstrategico(string cartaRei)
+        {
+            if (!JogadorConectado()) return "N";
+
+            // 1. Verifica se a carta é do jogador
+            bool ehMinhaCarta = minhasCartas.Contains(cartaRei);
+
+            // 2. Obtém o valor da carta
+            int valorCarta = rankingPersonagens.GetValueOrDefault(cartaRei, 0);
+
+            // 3. Estratégia básica:
+            if (ehMinhaCarta)
+            {
+                return "S"; // Sempre vota a favor das próprias cartas
+            }
+            else if (valorCarta >= 6) // Cartas muito valiosas
+            {
+                return "N"; // Vota contra para evitar que outros ganhem pontos
+            }
+            else // Cartas medianas ou fracas
+            {
+                // Chance 70% de votar Sim para cartas medianas/fracas
+                return random.Next(100) < 70 ? "S" : "N";
+            }
+        }
         //Listar partidas
         public void btnListarPartidas_Click(object sender, EventArgs e)
         {
@@ -283,85 +514,7 @@ namespace BOxford
         }
 
 
-        private void AtualizarTabuleiro(string estadoTabuleiro)
-        {
-            string[] linhas = estadoTabuleiro.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
-            Controls.OfType<PictureBox>().ToList().ForEach(p => Controls.Remove(p));
 
-            foreach (string linha in linhas)
-            {
-                string[] partes = linha.Split(',');
-                if (partes.Length != 2) continue;
-
-                int setor = int.Parse(partes[0].Trim());
-                string carta = partes[1].Trim();
-
-                PosicionarCarta(setor, carta);
-            }
-
-        }
-
-        private void PosicionarCarta(int setor, string carta)
-        {
-            Dictionary<int, Point> posicoesSetores = new Dictionary<int, Point>
-    {
-        { 0, new Point(555, 520) },
-        { 1, new Point(555, 440) },
-        { 2, new Point(555, 360) },
-        { 3, new Point(555, 280) },
-        { 4, new Point(555, 200) },
-        { 5, new Point(555, 120) },
-        { 10, new Point(634, 51) }
-    };
-
-            // Verifica se o setor existe
-            if (!posicoesSetores.ContainsKey(setor))
-            {
-                Console.WriteLine($"Setor {setor} não encontrado no dicionário.");
-                return;
-            }
-
-            // Conta quantas cartas já estão no setor
-            int cartasNoSetor = Controls.OfType<PictureBox>()
-                                        .Count(p => p.Tag != null && (int)p.Tag == setor);
-
-            // Obtém a imagem da carta usando a função ObterImagemDaCarta
-            Image imagem = ObterImagemDaCarta(carta);
-            if (imagem == null)
-            {
-                Console.WriteLine($"Carta '{carta}' não encontrada no dicionário de imagens.");
-                return;
-            }
-
-            // Define transparência na imagem
-            Bitmap bitmapImagem = new Bitmap(imagem);
-            bitmapImagem.MakeTransparent();
-
-            // Cria a PictureBox da carta
-            PictureBox cartaImg = new PictureBox
-            {
-                Size = new Size(50, 80),
-                Location = new Point(
-                    posicoesSetores[setor].X + (cartasNoSetor * 55),
-                    posicoesSetores[setor].Y
-                ),
-                BackgroundImage = bitmapImagem,
-                BackgroundImageLayout = ImageLayout.Stretch,
-                Tag = setor,
-                BackColor = Color.Transparent
-            };
-
-            // Adiciona ao formulário
-            Controls.Add(cartaImg);
-            cartaImg.BringToFront();
-
-            Console.WriteLine($"Carta '{carta}' posicionada no setor {setor}, posição {cartasNoSetor + 1}.");
-        }
-
-        private Image ObterImagemDaCarta(string carta)
-        {
-            return imagensCartas.ContainsKey(carta) ? imagensCartas[carta] : null;
-        }
 
 
 
@@ -450,204 +603,25 @@ namespace BOxford
         Random random = new Random();
         private static readonly Dictionary<string, int> rankingPersonagens = new Dictionary<string, int>
         {
-            {"A", 7},  // Adilson - mais valioso
-            {"B", 6},  // Beatriz
-            {"C", 5},  // Claro
-            {"D", 4},  // Douglas
-            {"E", 3},  // Eduardo
-            {"G", 2},  // Guilherme
-            {"H", 1},  // Heredia - menos valioso
-            {"K", 5},  // Kelly
-            {"L", 4},  // Leonardo
-            {"M", 3},  // Mario
-            {"Q", 2},  // Quintas
-            {"R", 1},  // Ranulfo
-            {"T", 6}   // Toshio
+            {"A", 7},  
+            {"B", 6},  
+            {"C", 5},  
+            {"D", 4},  
+            {"E", 3},  
+            {"G", 2},  
+            {"H", 1},  
+            {"K", 5},  
+            {"L", 4},  
+            {"M", 3},  
+            {"Q", 2},  
+            {"R", 1},  
+            {"T", 6}   
         };
 
         private List<string> minhasCartas = new List<string>();
         private List<string> personagensEmJogo = new List<string>();
 
-        private bool VerificarCartaNoSetor10()
-        {
-            try
-            {
-                // Primeiro sincroniza com o estado real do servidor
-                string estadoTabuleiro = EstadoAtualTabuleiro();
-                var linhas = estadoTabuleiro.Split(new[] { "\r\n", "\n", "\r" }, StringSplitOptions.RemoveEmptyEntries);
-
-                foreach (string linha in linhas)
-                {
-                    var partes = linha.Split(',');
-                    if (partes.Length == 2 && int.TryParse(partes[0].Trim(), out int setor) && setor == 10)
-                    {
-                        string carta = partes[1].Trim();
-                        lblControle.Text += $"REI DETECTADO: {carta} no setor 10\n";
-                        Console.WriteLine($"Carta {carta} chegou ao KingsMe");
-                        return true;
-                    }
-                }
-                return false;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro ao verificar setor 10: {ex.Message}");
-                return false;
-            }
-        }
-        private bool PartidaFoiIniciada()
-        {
-            try
-            {
-                string retorno = Jogo.VerificarVez(Convert.ToInt32(txtIDpartida.Text));
-                if (string.IsNullOrEmpty(retorno)) return false;
-
-                // Verifica múltiplos indicadores de partida iniciada
-                return retorno.Contains(",J,") ||  // Formato do servidor
-                       retorno.Contains("Jogando") ||
-                       !retorno.Contains("Aguardando");
-            }
-            catch
-            {
-                return false;
-            }
-        }
-        private void AtualizarMinhasCartas()
-        {
-            try
-            {
-                string retorno = Jogo.ListarCartas(Convert.ToInt32(txtIDjogador.Text), txtSenha.Text);
-
-                if (retorno.StartsWith("ERRO:"))
-                {
-                    Console.WriteLine($"Erro ao listar cartas: {retorno}");
-                    return;
-                }
-
-                minhasCartas.Clear();
-                foreach (char c in retorno.Trim())
-                {
-                    minhasCartas.Add(c.ToString());
-                }
-
-                // Remove cartas que já estão no tabuleiro
-                var cartasDisponiveis = minhasCartas.Except(personagensColocados).ToList();
-
-                // Ordena as cartas disponíveis pelo ranking
-                minhasCartas = cartasDisponiveis
-                    .OrderByDescending(c => rankingPersonagens.GetValueOrDefault(c, 0))
-                    .ToList();
-
-                Console.WriteLine($"Cartas disponíveis: {string.Join(",", minhasCartas)}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro em AtualizarMinhasCartas: {ex.Message}");
-            }
-        }
-        private bool reiEleito = false;
-        private void tmrVerificaVez_Tick(object sender, EventArgs e)
-        {
-            tmrVerificaVez.Enabled = false;
-            try
-            {
-                if (!JogadorConectado()) return;
-
-                // Atualiza primeiro o estado do jogo
-                var (dadosVez, partidaIniciada) = VerificarVezCompleto();
-
-                // Atualiza o tabuleiro visual
-                SincronizarEstadoTabuleiro();
-
-                // Verifica se a partida está em andamento
-                if (!partidaIniciada)
-                {
-                    tmrVerificaVez.Enabled = true;
-                    return;
-                }
-
-                if (dadosVez != null && dadosVez.Length >= 4)
-                {
-                    char faseAtual = dadosVez[3][0];
-                    string idJogadorVez = dadosVez[0];
-
-                    // Atualiza quem tem a vez
-                    lblIdVez.Text = idJogadorVez;
-
-                    // Verifica se houve reinício (setor 10 vazio após coroação)
-                    if (reiEleito && (!setores.ContainsKey(10) || setores[10].Count == 0))
-                    {
-                        reiEleito = false;
-                        votacaoConcluida = false;
-                        ReiniciarRodada();
-                        tmrVerificaVez.Enabled = true;
-                        return;
-                    }
-
-                    // Processa cada fase do jogo de acordo com a estratégia
-                    if (JogadorDaVez())
-                    {
-                        switch (faseAtual)
-                        {
-                            case 'S': // Setup
-                                if (personagensColocados.Count < 13) // Ainda há personagens para colocar
-                                {
-                                    ProcessarSetup();
-                                }
-                                break;
-
-                            case 'P': // Promoção
-                                 AtualizarMinhasCartas();
-                                 ProcessarPromocao();
-                                break;
-
-                            case 'V': // Votação
-                                
-                                AtualizarMinhasCartas();
-                                ProcessarVotacao();
-                                
-                                break;
-                        }
-
-                        // Verifica se o jogo terminou
-                        VerificarFimDeJogo();
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Erro no timer: {ex.Message}");
-            }
-            finally
-            {
-                tmrVerificaVez.Enabled = true;
-            }
-        }
-        private string EscolherVotoEstrategico(string cartaRei)
-        {
-            if (!JogadorConectado()) return "N";
-
-            // 1. Verifica se a carta é do jogador
-            bool ehMinhaCarta = minhasCartas.Contains(cartaRei);
-
-            // 2. Obtém o valor da carta
-            int valorCarta = rankingPersonagens.GetValueOrDefault(cartaRei, 0);
-
-            // 3. Estratégia básica:
-            if (ehMinhaCarta)
-            {
-                return "S"; // Sempre vota a favor das próprias cartas
-            }
-            else if (valorCarta >= 6) // Cartas muito valiosas
-            {
-                return "N"; // Vota contra para evitar que outros ganhem pontos
-            }
-            else // Cartas medianas ou fracas
-            {
-                // Chance 70% de votar Sim para cartas medianas/fracas
-                return random.Next(100) < 70 ? "S" : "N";
-            }
-        }
+       
         // Métodos auxiliares
         private int ObterNumeroJogadores()
         {
@@ -673,24 +647,7 @@ namespace BOxford
             };
         }
         // Estratégias específicas por número de jogadores
-        private string EstrategiaPara3Jogadores(string cartaRei, bool ehMinhaCarta, int valorCarta, int meusVotosNao)
-        {
-            // Com 3 jogadores, cada um tem muito poder de veto (4 "Não")
-            if (ehMinhaCarta)
-            {
-                // Se for minha carta, sempre voto "Sim" e guardo votos "Não"
-                return "S";
-            }
-
-            // Para cartas muito valiosas (A, B, T) - tentar bloquear
-            if (valorCarta >= 6 && meusVotosNao > 2)
-            {
-                return "N";
-            }
-
-            // Para cartas medianas, economizar votos
-            return "S";
-        }
+        
         private string EstrategiaPara4Jogadores(string cartaRei, bool ehMinhaCarta, int valorCarta, int meusVotosNao)
         {
             // Com 4 jogadores, o equilíbrio é mais delicado (3 "Não" cada)
@@ -713,6 +670,22 @@ namespace BOxford
 
             // Padrão: economize votos para cartas realmente perigosas
             return new Random().NextDouble() > 0.7 ? "N" : "S";
+        }
+        private void CarregarImagensCartas()
+        {
+            imagensCartas["A"] = Properties.Resources.CartaA;
+            imagensCartas["B"] = Properties.Resources.CartaB;
+            imagensCartas["C"] = Properties.Resources.CartaC;
+            imagensCartas["D"] = Properties.Resources.CartaD;
+            imagensCartas["E"] = Properties.Resources.CartaE;
+            imagensCartas["G"] = Properties.Resources.CartaG;
+            imagensCartas["H"] = Properties.Resources.CartaH;
+            imagensCartas["K"] = Properties.Resources.CartaK;
+            imagensCartas["L"] = Properties.Resources.CartaL;
+            imagensCartas["M"] = Properties.Resources.CartaM;
+            imagensCartas["Q"] = Properties.Resources.CartaQ;
+            imagensCartas["R"] = Properties.Resources.CartaR;
+            imagensCartas["T"] = Properties.Resources.CartaT;
         }
         private string EstrategiaPara5Jogadores(string cartaRei, bool ehMinhaCarta, int valorCarta, int meusVotosNao)
         {
@@ -770,7 +743,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro ao verificar fim de jogo: {ex.Message}");
             }
         }
         private void ReiniciarRodada()
@@ -809,7 +781,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro ao reiniciar rodada: {ex.Message}");
             }
         }
         private void SincronizarEstadoTabuleiro(bool forcarAtualizacao = false)
@@ -833,7 +804,7 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro ao sincronizar tabuleiro: {ex.Message}");
+
             }
         }
 
@@ -917,7 +888,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro no ProcessarSetup: {ex.Message}");
             }
         }
         private int EscolherMelhorSetorSetup()
@@ -1034,7 +1004,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em ProcessarPromocao: {ex.Message}");
             }
         }
         private bool votacaoEmAndamento = false;
@@ -1090,7 +1059,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em ProcessarVotacao: {ex.Message}");
             }
         }
         private bool JogadorConectado()
@@ -1100,6 +1068,24 @@ namespace BOxford
                    !string.IsNullOrEmpty(txtIDpartida.Text) &&
                    int.TryParse(txtIDjogador.Text, out _) &&
                    int.TryParse(txtIDpartida.Text, out _);
+        }
+        private string EstrategiaPara3Jogadores(string cartaRei, bool ehMinhaCarta, int valorCarta, int meusVotosNao)
+        {
+            // Com 3 jogadores, cada um tem muito poder de veto (4 "Não")
+            if (ehMinhaCarta)
+            {
+                // Se for minha carta, sempre voto "Sim" e guardo votos "Não"
+                return "S";
+            }
+
+            // Para cartas muito valiosas (A, B, T) - tentar bloquear
+            if (valorCarta >= 6 && meusVotosNao > 2)
+            {
+                return "N";
+            }
+
+            // Para cartas medianas, economizar votos
+            return "S";
         }
         private void PromoverPersonagens()
         {
@@ -1154,7 +1140,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em PromoverPersonagens: {ex.Message}");
             }
         }
         private string SortearPersonagemDisponivel()
@@ -1164,7 +1149,6 @@ namespace BOxford
                 string retorno = Jogo.ListarPersonagens();
                 if (retorno.StartsWith("ERRO:"))
                 {
-                    Console.WriteLine($"Erro ao listar personagens: {retorno}");
                     return null;
                 }
 
@@ -1175,9 +1159,6 @@ namespace BOxford
                 var estadoTabuleiro = EstadoAtualTabuleiro();
                 var personagensNoTabuleiro = ObterPersonagensNoTabuleiro(estadoTabuleiro);
 
-                // Debug: Mostrar personagens disponíveis
-                Console.WriteLine("Todos os personagens: " + string.Join(",", todos));
-                Console.WriteLine("Personagens no tabuleiro: " + string.Join(",", personagensNoTabuleiro));
 
                 List<string> disponiveis = todos
                     .Where(p => !string.IsNullOrWhiteSpace(p))
@@ -1186,24 +1167,20 @@ namespace BOxford
                     .ToList();
 
                 // Debug: Mostrar personagens disponíveis após filtro
-                Console.WriteLine("Personagens disponíveis: " + string.Join(",", disponiveis));
 
                 if (disponiveis.Count == 0)
                 {
-                    Console.WriteLine("Nenhum personagem disponível para posicionar.");
                     return null;
                 }
 
                 // Seleção verdadeiramente aleatória
                 int index = random.Next(disponiveis.Count);
                 string selecionado = disponiveis[index];
-                Console.WriteLine($"Personagem selecionado aleatoriamente: {selecionado}");
 
                 return selecionado;
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em SortearPersonagemDisponivel: {ex.Message}");
                 return null;
             }
         }
@@ -1247,14 +1224,12 @@ namespace BOxford
             {
                 if (setor < 1 || setor > 4)
                 {
-                    Console.WriteLine($"Setor {setor} inválido para fase de setup.");
                     return;
                 }
 
                 // Verifica se o setor tem espaço
                 if (setores.ContainsKey(setor) && setores[setor].Count >= 4)
                 {
-                    Console.WriteLine($"Setor {setor} já está cheio.");
                     return;
                 }
 
@@ -1263,7 +1238,6 @@ namespace BOxford
                     personagem = EscolherMelhorPersonagemDisponivel();
                     if (personagem == null)
                     {
-                        Console.WriteLine("Nenhum personagem disponível para posicionar.");
                         return;
                     }
                 }
@@ -1273,7 +1247,6 @@ namespace BOxford
 
                 if (estadoAtual.StartsWith("ERRO:"))
                 {
-                    Console.WriteLine($"Erro ao posicionar: {estadoAtual}");
 
                     // Tenta o próximo personagem disponível
                     string proximoPersonagem = EscolherMelhorPersonagemDisponivel();
@@ -1297,7 +1270,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em PosicionarPersonagem: {ex.Message}");
             }
         }
 
@@ -1331,7 +1303,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro ao sincronizar tabuleiro: {ex.Message}");
             }
         }
         private string EscolherMelhorPersonagemDisponivel()
@@ -1360,7 +1331,6 @@ namespace BOxford
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Erro em EscolherMelhorPersonagemDisponivel: {ex.Message}");
                 return null;
             }
         }
